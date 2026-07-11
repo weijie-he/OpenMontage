@@ -683,6 +683,7 @@ class TestCapabilityMetadata:
             "doubao",
             "elevenlabs",
             "google_tts",
+            "minimax",
             "openai",
             "piper",
         }

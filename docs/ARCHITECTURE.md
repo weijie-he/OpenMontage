@@ -385,6 +385,7 @@ All config is validated via Pydantic models in `lib/config_model.py`.
 | `ELEVENLABS_API_KEY` | elevenlabs_tts, music_gen | TTS, music, sound effects |
 | `OPENAI_API_KEY` | openai_tts, openai_image | TTS fallback, GPT Image 2 |
 | `XAI_API_KEY` | grok_image, grok_video | Grok image editing/generation, Grok video generation |
+| `MINIMAX_API_KEY` | minimax_video, minimax_tts | MiniMax official Hailuo 2.3 video and Speech 2.8 TTS |
 | `FAL_KEY` | flux_image, kling_video, veo_video, minimax_video, recraft_image | fal.ai hosted models (FLUX, Veo, Kling, MiniMax, Recraft) |
 | `HEYGEN_API_KEY` | heygen_video | Multi-provider video generation |
 | `PEXELS_API_KEY` | pexels_image, pexels_video | Stock media |

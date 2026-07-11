@@ -203,6 +203,9 @@ This repo is built for agentic operation. If you're an OpenClaw-style agent, her
 # Image + video gateway:
 FAL_KEY=your-key               # FLUX images + Google Veo, Kling, MiniMax video + Recraft images
 
+# MiniMax official API (one key for video + voice):
+MINIMAX_API_KEY=your-key       # Hailuo 2.3 video + Speech 2.8 TTS
+
 # Free stock media:
 PEXELS_API_KEY=your-key        # Free stock footage and images
 PIXABAY_API_KEY=your-key       # Free stock footage and images

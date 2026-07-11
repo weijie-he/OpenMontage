@@ -42,6 +42,7 @@ XAI_API_KEY=                 # xAI Grok image generation/editing + Grok video ge
 DOUBAO_SPEECH_API_KEY=       # Volcengine Doubao Speech TTS (strong Mandarin narration)
 DOUBAO_SPEECH_VOICE_TYPE=    # Default Doubao speaker/voice type
 DASHSCOPE_API_KEY=           # Alibaba DashScope (Qwen image gen, TTS, ASR with word timestamps)
+MINIMAX_API_KEY=             # MiniMax official Hailuo video + Speech 2.8 TTS
 
 # MULTI-MODEL GATEWAY (one key, 6+ tools)
 FAL_KEY=                     # FLUX, Recraft, Kling, Veo, MiniMax video
@@ -129,6 +130,59 @@ The ASR tool (`qwen3-asr-flash-filetrans`) uses an async submit-poll pattern. Au
 | `qwen-image-2.0-pro` | ~$0.02 per image (check console for current rates) |
 | `qwen3-tts-flash` | ~$0.000015 per character |
 | `qwen3-asr-flash-filetrans` | Per-minute billing (check console) |
+
+---
+
+### MiniMax — Hailuo Video + Speech 2.8 (Direct)
+
+> **Best when you want one MiniMax account for generated motion and Mandarin voices.** The direct route avoids a third-party video gateway and exposes both Hailuo video and Speech 2.8 TTS under one API key.
+
+**Tools unlocked:** `minimax_video`, `minimax_tts`
+**Env var:** `MINIMAX_API_KEY`
+
+#### Setup
+
+1. Create a MiniMax Platform account at [platform.minimax.io](https://platform.minimax.io/).
+2. Create an API key in Account Management > API Keys.
+3. Add to `.env`: `MINIMAX_API_KEY=your-key-here`.
+4. Run the registry preflight and confirm both `minimax_video` and `minimax_tts` are available.
+
+#### What it unlocks
+
+- Direct text-to-video and image-to-video with `MiniMax-Hailuo-2.3`.
+- Local first-frame images encoded as Base64 data URLs without a fal.ai upload.
+- Mandarin narration and character dialogue with `speech-2.8-hd`.
+- Voice speed, volume, pitch, emotion, language hint, and pronunciation controls.
+
+#### API notes
+
+Video is asynchronous: create `/v1/video_generation`, poll `/v1/query/video_generation`, retrieve `/v1/files/retrieve`, then download the returned file URL. TTS calls `/v1/t2a_v2` in non-streaming mode and decodes hexadecimal audio from `data.audio`. Both APIs can return business errors in `base_resp` even when HTTP succeeds.
+
+The old fal.ai MiniMax route remains available through `minimax_video` with `backend="fal"`. `backend="auto"` prefers the official API whenever `MINIMAX_API_KEY` is present.
+
+#### Pricing guardrail
+
+OpenMontage uses the current published MiniMax pay-as-you-go rates:
+
+| Model/spec | Price |
+|---|---:|
+| `MiniMax-Hailuo-2.3`, 768P 6s | $0.28/video |
+| `MiniMax-Hailuo-2.3`, 768P 10s | $0.56/video |
+| `MiniMax-Hailuo-2.3`, 1080P 6s | $0.49/video |
+| `MiniMax-Hailuo-2.3-Fast`, 768P 6s / 10s | $0.19 / $0.32 |
+| `MiniMax-Hailuo-2.3-Fast`, 1080P 6s | $0.33/video |
+| `speech-2.8-hd` | $0.10/1,000 characters |
+| `speech-2.8-turbo` | $0.06/1,000 characters |
+
+Confirm the live [MiniMax pay-as-you-go page](https://platform.minimax.io/docs/guides/pricing-paygo) before approval because prices can change. Negotiated or package rates can override the estimator with:
+
+```bash
+MINIMAX_VIDEO_COST_PER_CLIP_USD=
+MINIMAX_VIDEO_COST_PER_SECOND_USD=
+MINIMAX_TTS_COST_PER_1000_CHARS_USD=
+```
+
+Generate one short motion sample and one 10–15 second voice sample before approving a batch.
 
 ---
 
@@ -782,6 +836,7 @@ These tools require only FFmpeg or Python packages — no GPU, no API key.
 | **Piper** | — (install only) | `piper_tts` | Free |
 | **Google** | `GOOGLE_API_KEY` (or `GEMINI_API_KEY`) | `google_tts`, `google_imagen`, `google_music`, `gemini_omni_video`, `veo_video` | Free tier (TTS) + paid |
 | **ElevenLabs** | `ELEVENLABS_API_KEY` | `elevenlabs_tts`, `music_gen` | Free tier + paid |
+| **MiniMax direct** | `MINIMAX_API_KEY` | `minimax_video`, `minimax_tts` | Pay-as-you-go; confirm current console rate |
 | **fal.ai** | `FAL_KEY` | `flux_image`, `recraft_image`, `kling_video`, `veo_video`, `minimax_video` | Pay-as-you-go |
 | **OpenAI** | `OPENAI_API_KEY` | `openai_tts`, `openai_image` | Paid only |
 | **xAI** | `XAI_API_KEY` | `grok_image`, `grok_video` | Paid only |

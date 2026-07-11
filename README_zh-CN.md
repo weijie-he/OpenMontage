@@ -167,6 +167,9 @@ make setup
 # 图像 + 视频网关:
 FAL_KEY=your-key               # FLUX 图像 + Google Veo、Kling、MiniMax 视频 + Recraft 图像
 
+# MiniMax 官方 API（一个密钥同时用于视频与配音）:
+MINIMAX_API_KEY=your-key       # Hailuo 2.3 视频 + Speech 2.8 TTS
+
 # 免费素材库:
 PEXELS_API_KEY=your-key        # 免费库存视频和图像
 PIXABAY_API_KEY=your-key       # 免费库存视频和图像

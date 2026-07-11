@@ -1,7 +1,7 @@
 ---
 name: ai-video-gen
 description: |
-  Generate AI videos from text prompts using multiple provider gateways. Use when: (1) Generating videos from text descriptions, (2) Creating AI-generated video clips for content production, (3) Image-to-video generation with a reference image, (4) Choosing between video generation providers (VEO, Kling, Sora, Runway, Seedance, MiniMax, Gemini Omni). Supports gateways: HeyGen API, fal.ai API, and the Gemini API (Gemini Omni Flash).
+  Generate AI videos from text prompts using multiple provider gateways. Use when: (1) Generating videos from text descriptions, (2) Creating AI-generated video clips for content production, (3) Image-to-video generation with a reference image, (4) Choosing between video generation providers (VEO, Kling, Sora, Runway, Seedance, MiniMax, Gemini Omni). Supports HeyGen, fal.ai, MiniMax direct, and Gemini API routes.
 allowed-tools: mcp__heygen__*
 metadata:
   openclaw:
@@ -9,17 +9,19 @@ metadata:
       env_any:
         - HEYGEN_API_KEY
         - FAL_KEY
+        - MINIMAX_API_KEY
         - GEMINI_API_KEY
         - GOOGLE_API_KEY
 ---
 
 # Video Generation (Multi-Gateway)
 
-Generate AI videos from text prompts. Supports multiple providers via two API gateways:
+Generate AI videos from text prompts through multiple provider gateways and direct APIs:
 
 | Gateway | Env Variable | Providers | Tool |
 |---------|-------------|-----------|------|
 | **fal.ai** | `FAL_KEY` | **Seedance 2.0** (standard + fast), Kling v3/v2.1, MiniMax, VEO | `seedance_video`, `kling_video`, `minimax_video`, `veo_video` |
+| **MiniMax direct** | `MINIMAX_API_KEY` | Hailuo 2.3 / 2.3 Fast / 02 | `minimax_video` |
 | **HeyGen** | `HEYGEN_API_KEY` | VEO 3.1, Kling Pro, Sora v2, Runway Gen-4, Seedance Pro / Lite (1.x) | `heygen_video` |
 | **Gemini API** | `GEMINI_API_KEY` / `GOOGLE_API_KEY` | Gemini Omni Flash (generation + conversational editing) | `gemini_omni_video` |
 
@@ -35,6 +37,7 @@ Use whichever configured gateway best matches the user's available providers and
 
 - **HeyGen:** Set `HEYGEN_API_KEY` to access the multi-model gateway.
 - **fal.ai:** Set `FAL_KEY` to access Kling, MiniMax, and Veo through fal.ai.
+- **MiniMax direct:** Set `MINIMAX_API_KEY` for the official Hailuo API. Read Layer 3 `minimax` before using direct video or TTS.
 
 Do not describe either gateway as the default or top choice without checking the registry and current task fit first.
 

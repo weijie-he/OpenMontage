@@ -115,6 +115,11 @@ class VideoSelector(BaseTool):
                 "type": "string",
                 "description": "Resolution hint for providers that support named output resolutions.",
             },
+            "backend": {
+                "type": "string",
+                "enum": ["auto", "direct", "minimax", "fal"],
+                "description": "Provider-specific backend lock. MiniMax accepts direct/minimax/fal; use direct when official API routing was approved.",
+            },
             "workflow_json": {
                 "type": "string",
                 "description": (
@@ -177,9 +182,15 @@ class VideoSelector(BaseTool):
         caller — with no director skill enforcing the prohibition — still cannot
         fall back to an image tool when motion was requested.
         """
-        tools = [t.name for t in self._providers()]
+        providers = self._filter_candidates(inputs, self._providers())
+        allowed = set(inputs.get("allowed_providers") or [])
+        if allowed:
+            providers = [tool for tool in providers if tool.provider in allowed]
+        tools = [tool.name for tool in providers]
         operation = inputs.get("operation", "text_to_video")
-        if operation in self.MOTION_REQUIRED_OPERATIONS:
+        # A declared provider allowlist is a governance lock, so never append
+        # an out-of-band image fallback even for a text-to-video request.
+        if operation in self.MOTION_REQUIRED_OPERATIONS or allowed:
             return tools
         return tools + ["image_selector"]
 
@@ -221,6 +232,9 @@ class VideoSelector(BaseTool):
             rank_inputs = self._rank_inputs(inputs)
             task_context = self._prepare_task_context(rank_inputs)
             candidates = self._filter_candidates(rank_inputs, candidates)
+            allowed = set(rank_inputs.get("allowed_providers") or [])
+            if allowed:
+                candidates = [tool for tool in candidates if tool.provider in allowed]
             rankings = rank_providers(candidates, task_context)
             return ToolResult(
                 success=True,
@@ -233,6 +247,10 @@ class VideoSelector(BaseTool):
 
         # Normal generation — use scored selection
         task_context = self._prepare_task_context(inputs)
+        candidates = self._filter_candidates(inputs, candidates)
+        allowed = set(inputs.get("allowed_providers") or [])
+        if allowed:
+            candidates = [tool for tool in candidates if tool.provider in allowed]
         tool, score = self._select_best_tool(inputs, candidates, task_context)
         if tool is None:
             return ToolResult(success=False, error="No video generation provider available.")
@@ -247,8 +265,16 @@ class VideoSelector(BaseTool):
         # Auto-resolve reference_image_path to a URL for providers that need it
         if adapted.get("operation") == "image_to_video" and adapted.get("reference_image_path"):
             tool_props = getattr(tool, "input_schema", {}).get("properties", {})
-            # If the provider uses image_url (not reference_image_path), upload and convert
-            if "image_url" in tool_props and "image_url" not in adapted:
+            # Upload only for providers that accept URL inputs but cannot handle
+            # a local path themselves.  Direct APIs such as MiniMax accept a
+            # local path and encode it provider-side, so forcing every tool with
+            # an ``image_url`` alias through fal.ai creates a needless FAL_KEY
+            # dependency and may send the reference to the wrong gateway.
+            if (
+                "image_url" in tool_props
+                and "reference_image_path" not in tool_props
+                and "image_url" not in adapted
+            ):
                 try:
                     from tools.video._shared import upload_image_fal
                     adapted["image_url"] = upload_image_fal(adapted["reference_image_path"])
@@ -268,7 +294,10 @@ class VideoSelector(BaseTool):
                 if t.name != tool.name and t.get_status().value == "available"
             ]
             # Input-aware fallback list (drops image_selector for motion-required briefs).
-            result.data.setdefault("fallback_tools", self.fallback_tools_for(inputs))
+            result.data.setdefault(
+                "fallback_tools",
+                [name for name in self.fallback_tools_for(inputs) if name != tool.name],
+            )
         return result
 
     def _select_best_tool(

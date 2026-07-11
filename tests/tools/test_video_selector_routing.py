@@ -23,7 +23,8 @@ from typing import Any
 
 import pytest
 
-from tools.base_tool import ToolStatus
+from tools.base_tool import ToolResult, ToolStatus
+from tools.audio.tts_selector import TTSSelector
 from tools.video.video_selector import VideoSelector
 
 
@@ -279,3 +280,105 @@ def test_estimate_cost_zero_when_no_providers():
     sel = VideoSelector()
     sel._providers = lambda: []  # type: ignore[assignment]
     assert sel.estimate_cost({"prompt": "x"}) == 0.0
+
+
+def test_provider_owned_local_reference_path_is_not_uploaded_to_fal(rankings, monkeypatch, tmp_path):
+    """Providers declaring reference_image_path receive it unchanged."""
+    tool = _StubTool("minimax_video", "minimax")
+    tool.input_schema = {
+        "properties": {
+            "prompt": {},
+            "image_url": {},
+            "reference_image_path": {},
+        }
+    }
+    captured: dict[str, Any] = {}
+
+    def execute(inputs):  # noqa: ANN001, ANN202
+        captured.update(inputs)
+        return ToolResult(success=True)
+
+    tool.execute = execute  # type: ignore[attr-defined]
+    rankings.append(_ScoreStub("minimax_video", "minimax", 0.90))
+
+    selector = VideoSelector()
+    selector._providers = lambda: [tool]  # type: ignore[assignment]
+    monkeypatch.setattr(
+        "tools.video._shared.upload_image_fal",
+        lambda path: pytest.fail("local-path-capable provider must not call fal upload"),
+    )
+    image_path = tmp_path / "first.png"
+    image_path.write_bytes(b"png")
+
+    result = selector.execute(
+        {
+            "prompt": "turn toward camera",
+            "operation": "image_to_video",
+            "reference_image_path": str(image_path),
+            "preferred_provider": "minimax",
+            "backend": "direct",
+        }
+    )
+
+    assert result.success is True
+    assert captured["reference_image_path"] == str(image_path)
+    assert captured["backend"] == "direct"
+    assert "image_url" not in captured
+
+
+def test_video_provider_lock_filters_alternatives_and_fallback_metadata(rankings):
+    minimax = _StubTool("minimax_video", "minimax")
+    kling = _StubTool("kling_video", "kling")
+    minimax.execute = lambda inputs: ToolResult(success=True)  # type: ignore[attr-defined]
+    kling.execute = lambda inputs: pytest.fail("provider lock must prevent Kling")  # type: ignore[attr-defined]
+    rankings.extend(
+        [
+            _ScoreStub("minimax_video", "minimax", 0.90),
+            _ScoreStub("kling_video", "kling", 0.95),
+        ]
+    )
+    selector = VideoSelector()
+    selector._providers = lambda: [minimax, kling]  # type: ignore[assignment]
+
+    result = selector.execute(
+        {
+            "prompt": "river",
+            "preferred_provider": "minimax",
+            "allowed_providers": ["minimax"],
+            "backend": "direct",
+        }
+    )
+
+    assert result.success is True
+    assert result.data["selected_provider"] == "minimax"
+    assert result.data["alternatives_considered"] == []
+    assert result.data["fallback_tools"] == []
+    assert "image_selector" not in result.data["fallback_tools"]
+
+
+def test_tts_provider_lock_filters_alternatives_and_fallback_metadata(rankings):
+    minimax = _StubTool("minimax_tts", "minimax")
+    other = _StubTool("other_tts", "other")
+    minimax.execute = lambda inputs: ToolResult(success=True)  # type: ignore[attr-defined]
+    other.execute = lambda inputs: pytest.fail("provider lock must prevent other TTS")  # type: ignore[attr-defined]
+    rankings.extend(
+        [
+            _ScoreStub("minimax_tts", "minimax", 0.90),
+            _ScoreStub("other_tts", "other", 0.95),
+        ]
+    )
+    selector = TTSSelector()
+    selector._providers = lambda: [minimax, other]  # type: ignore[assignment]
+
+    result = selector.execute(
+        {
+            "text": "端午又快到了。",
+            "preferred_provider": "minimax",
+            "allowed_providers": ["minimax"],
+        }
+    )
+
+    assert result.success is True
+    assert result.data["selected_provider"] == "minimax"
+    assert result.data["alternatives_considered"] == []
+    assert result.data["fallback_tools"] == []

@@ -83,6 +83,25 @@ class TTSSelector(BaseTool):
                 "maximum": 50,
                 "description": "Provider-specific pitch control. Google TTS accepts -20..20; HeyGen-style providers may accept wider ranges.",
             },
+            "volume": {
+                "type": "number",
+                "exclusiveMinimum": 0,
+                "maximum": 10,
+                "description": "Provider-specific output volume. MiniMax accepts values greater than 0 and at most 10.",
+            },
+            "emotion": {
+                "type": "string",
+                "description": "Provider-specific delivery emotion, such as happy, sad, angry, or neutral.",
+            },
+            "language_boost": {
+                "type": "string",
+                "description": "Provider language hint. MiniMax accepts values such as auto, Chinese, English, and Cantonese.",
+            },
+            "pronunciation_tone": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Provider pronunciation entries. Passed through to MiniMax pronunciation_dict.tone.",
+            },
             "input_type": {
                 "type": "string",
                 "enum": ["text", "ssml"],
@@ -148,7 +167,7 @@ class TTSSelector(BaseTool):
         return ToolStatus.UNAVAILABLE
 
     def estimate_cost(self, inputs: dict[str, Any]) -> float:
-        candidates = self._providers()
+        candidates = self._allowed_candidates(inputs, self._providers())
         if not candidates:
             return 0.0
         tool, _ = self._select_best_tool(inputs, candidates, self._prepare_task_context(inputs))
@@ -158,7 +177,7 @@ class TTSSelector(BaseTool):
         from lib.scoring import rank_providers
 
         task_context = self._prepare_task_context(inputs)
-        candidates = self._providers()
+        candidates = self._allowed_candidates(inputs, self._providers())
 
         # Rank mode — return scored provider rankings without generating
         if inputs.get("operation") == "rank":
@@ -189,7 +208,19 @@ class TTSSelector(BaseTool):
                 t.name for t in candidates
                 if t.name != tool.name and t.get_status().value == "available"
             ]
+            result.data["fallback_tools"] = [
+                t.name for t in candidates if t.name != tool.name
+            ]
         return result
+
+    @staticmethod
+    def _allowed_candidates(
+        inputs: dict[str, Any], candidates: list[BaseTool]
+    ) -> list[BaseTool]:
+        allowed = set(inputs.get("allowed_providers") or [])
+        if not allowed:
+            return candidates
+        return [tool for tool in candidates if tool.provider in allowed]
 
     def _select_best_tool(
         self,
