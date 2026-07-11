@@ -126,12 +126,52 @@ blindly retried.
 
 ## Approval Workflow
 
-Both tools call paid external APIs. Before a batch:
+Both tools call paid external APIs. Before production:
 
-1. Confirm the current MiniMax console price; direct-API pricing must not reuse a fal.ai estimate.
-2. Generate one short video sample and one 10–15 second voice sample only after cost approval.
+1. Unless a cost-calculation opt-out is recorded, confirm the current MiniMax console price; direct-API pricing must not reuse a fal.ai estimate.
+2. Generate one short video sample and one 10–15 second voice sample after creative approval (and cost approval only when the project has not opted out).
 3. Approve motion consistency, voice identity, pronunciation, and pace.
-4. Generate the remaining scenes or dialogue only after sample approval.
+4. After sample approval, continue in rolling micro-batches rather than generating the full remainder at once.
+
+### Rolling micro-batches (mandatory)
+
+Sample approval never authorizes a one-shot full-video batch. For paid MiniMax
+video and TTS production:
+
+1. Generate one story segment at a time. Default to one hero/dialogue clip per
+   batch; at most two closely related clips or one short voice cluster.
+2. Record task IDs, result paths, and provider-returned charge-state fields in
+   the project checkpoint before starting the next segment. A project may opt
+   out of cost calculations, but it must never waive task-ID persistence.
+3. Review character identity, costume, palette, motion coherence, lip/audio
+   timing, and continuity against the immediately preceding approved segment.
+4. If the segment fails, regenerate only that segment. Do not rerun successful
+   neighboring clips and do not submit the next segment while a paid task has
+   unknown charge state.
+5. Stop the rolling run on character/style drift, repeated provider failure,
+   an unknown/anomalous provider charge state, or any decision that would switch provider,
+   model family, runtime, or approved visual direction.
+
+For a long film, organize micro-batches by contiguous story beats (for example
+端午盛景 → 黄昏独候 → 初遇误会 → 火把归途), but still submit and verify
+the individual 6/10-second MiniMax tasks inside each beat one by one.
+
+### Cost-calculation opt-out
+
+When the project decision log records that the user does not want cost
+calculations (as in `bian-cheng`), that preference is binding:
+
+- Do not calculate aggregate estimates, compare quality/budget tiers, request
+  budget approval, or present routine cost figures to the user.
+- Do not delay a previously approved micro-batch merely to obtain another cost
+  confirmation.
+- Continue the rolling micro-batch rule and per-item checkpoints exactly as
+  written above; a cost opt-out never authorizes a full-film batch.
+- Preserve provider-returned `task_id`, `file_id`, `charge_state`,
+  `potential_cost_usd`, and `cost_usd` only as internal safety/audit metadata.
+  Do not use those fields to create forecasts or user-facing totals.
+- Missing or hidden cost information must never be interpreted as “free.” On
+  unknown charge state, stop and resume by task ID instead of resubmitting.
 
 OpenMontage uses MiniMax's published pay-as-you-go rates by default:
 

@@ -54,6 +54,35 @@ Before batch-generating assets, produce one sample of each expensive type and sh
 
 If rejected, adjust parameters and retry (max 3 iterations). Do not batch until approved.
 
+### 1b.1 Rolling Micro-Batches for Paid Generative Assets
+
+Passing the initial sample gate does **not** authorize generating every scene
+in one job or one uninterrupted loop. For paid video/TTS assets, work in
+rolling micro-batches:
+
+1. Generate one story segment at a time — normally one hero/dialogue video
+   clip, at most two closely related clips, or one short voice cluster.
+2. Persist provider task IDs, output paths, provider-returned charge-state
+   fields, and `metadata.partial_progress` after every completed item.
+3. Review the item against the approved style and the immediately preceding
+   segment before submitting the next paid item.
+4. On rejection or drift, regenerate only the failed item. Never rerun already
+   approved neighboring assets.
+5. Stop on unknown/anomalous charge state, provider/model/runtime
+   change, or repeated consistency failure. Resume paid tasks by their stored
+   IDs instead of resubmitting prompts.
+
+A user may waive repeated budget confirmation while keeping this rolling
+generation rule. That waiver removes repeated approval prompts; it does not
+remove provider-returned charge-state safety metadata, checkpoints,
+sample/style gates, or per-item QA.
+
+If the decision log explicitly records a **cost-calculation opt-out**, do not
+compute forecasts, compare budget tiers, request budget confirmation, or show
+routine cost totals. Keep only provider-returned charge fields as internal
+safety metadata so unknown-charge tasks are resumed rather than duplicated.
+The rolling micro-batch, checkpoint, and per-item QA rules remain mandatory.
+
 ### 1c. Multi-Image Generation for Image-Based Animation (Approach A)
 
 When `animation_mode == "image_animation"`, each scene needs **2-3 images** for crossfade animation. This is what makes stills look like movement.
