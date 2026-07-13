@@ -138,14 +138,15 @@ The ASR tool (`qwen3-asr-flash-filetrans`) uses an async submit-poll pattern. Au
 > **Best when you want one MiniMax account for generated motion and Mandarin voices.** The direct route avoids a third-party video gateway and exposes both Hailuo video and Speech 2.8 TTS under one API key.
 
 **Tools unlocked:** `minimax_video`, `minimax_tts`
-**Env var:** `MINIMAX_API_KEY`
+**Env vars:** `MINIMAX_API_KEY`, `MINIMAX_API_BASE_URL`
 
 #### Setup
 
-1. Create a MiniMax Platform account at [platform.minimax.io](https://platform.minimax.io/).
+1. Create a China MiniMax Platform account at [platform.minimaxi.com](https://platform.minimaxi.com/).
 2. Create an API key in Account Management > API Keys.
 3. Add to `.env`: `MINIMAX_API_KEY=your-key-here`.
-4. Run the registry preflight and confirm both `minimax_video` and `minimax_tts` are available.
+4. Keep the China default: `MINIMAX_API_BASE_URL=https://api.minimaxi.com`.
+5. Run the registry preflight and confirm both `minimax_video` and `minimax_tts` are available.
 
 #### What it unlocks
 
@@ -157,6 +158,11 @@ The ASR tool (`qwen3-asr-flash-filetrans`) uses an async submit-poll pattern. Au
 #### API notes
 
 Video is asynchronous: create `/v1/video_generation`, poll `/v1/query/video_generation`, retrieve `/v1/files/retrieve`, then download the returned file URL. TTS calls `/v1/t2a_v2` in non-streaming mode and decodes hexadecimal audio from `data.audio`. Both APIs can return business errors in `base_resp` even when HTTP succeeds.
+
+OpenMontage defaults to the China control plane (`api.minimaxi.com`). China and
+Global keys must be paired with their own API host. To use a Global key, set
+`MINIMAX_API_BASE_URL=https://api.minimax.io`. Only these two official HTTPS
+hosts are accepted so credentials cannot be forwarded to an arbitrary server.
 
 The old fal.ai MiniMax route remains available through `minimax_video` with `backend="fal"`. `backend="auto"` prefers the official API whenever `MINIMAX_API_KEY` is present.
 
@@ -174,7 +180,7 @@ OpenMontage uses the current published MiniMax pay-as-you-go rates:
 | `speech-2.8-hd` | $0.10/1,000 characters |
 | `speech-2.8-turbo` | $0.06/1,000 characters |
 
-Confirm the live [MiniMax pay-as-you-go page](https://platform.minimax.io/docs/guides/pricing-paygo) before approval because prices can change. Negotiated or package rates can override the estimator with:
+Confirm the live [MiniMax China pay-as-you-go page](https://platform.minimaxi.com/docs/guides/pricing-paygo) before approval because prices can change. Negotiated or package rates can override the estimator with:
 
 ```bash
 MINIMAX_VIDEO_COST_PER_CLIP_USD=

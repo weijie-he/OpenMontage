@@ -169,6 +169,7 @@ FAL_KEY=your-key               # FLUX 图像 + Google Veo、Kling、MiniMax 视�
 
 # MiniMax 官方 API（一个密钥同时用于视频与配音）:
 MINIMAX_API_KEY=your-key       # Hailuo 2.3 视频 + Speech 2.8 TTS
+MINIMAX_API_BASE_URL=https://api.minimaxi.com  # 默认中国站；国际站 Key 才使用 api.minimax.io
 
 # 免费素材库:
 PEXELS_API_KEY=your-key        # 免费库存视频和图像

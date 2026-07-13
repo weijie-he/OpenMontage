@@ -33,7 +33,7 @@ from tools.base_tool import (
 
 class MiniMaxVideo(BaseTool):
     name = "minimax_video"
-    version = "0.2.0"
+    version = "0.3.0"
     tier = ToolTier.GENERATE
     capability = "video_generation"
     provider = "minimax"
@@ -45,7 +45,9 @@ class MiniMaxVideo(BaseTool):
     dependencies = []
     install_instructions = (
         "Set MINIMAX_API_KEY for MiniMax's official API (recommended).\n"
-        "  Get one at https://platform.minimax.io/user-center/basic-information/interface-key\n"
+        "  China: https://platform.minimaxi.com/user-center/basic-information/interface-key\n"
+        "  Global: https://platform.minimax.io/user-center/basic-information/interface-key\n"
+        "MINIMAX_API_BASE_URL defaults to China's https://api.minimaxi.com.\n"
         "Alternatively set FAL_KEY to use the legacy fal.ai gateway."
     )
     agent_skills = ["minimax", "ai-video-gen"]
@@ -226,9 +228,11 @@ class MiniMaxVideo(BaseTool):
         "Watch the generated clip for motion coherence, character consistency, and prompt adherence"
     ]
 
-    DIRECT_CREATE_URL = "https://api.minimax.io/v1/video_generation"
-    DIRECT_QUERY_URL = "https://api.minimax.io/v1/query/video_generation"
-    DIRECT_RETRIEVE_URL = "https://api.minimax.io/v1/files/retrieve"
+    DEFAULT_API_BASE_URL = "https://api.minimaxi.com"
+    OFFICIAL_API_HOSTS = {"api.minimaxi.com", "api.minimax.io"}
+    DIRECT_CREATE_URL = f"{DEFAULT_API_BASE_URL}/v1/video_generation"
+    DIRECT_QUERY_URL = f"{DEFAULT_API_BASE_URL}/v1/query/video_generation"
+    DIRECT_RETRIEVE_URL = f"{DEFAULT_API_BASE_URL}/v1/files/retrieve"
     FAL_QUEUE_HOSTS = {"queue.fal.run"}
     MAX_REFERENCE_IMAGE_BYTES = 20 * 1024 * 1024
     DIRECT_T2V_MODELS = {
@@ -275,6 +279,39 @@ class MiniMaxVideo(BaseTool):
     @staticmethod
     def _direct_api_key() -> str | None:
         return os.environ.get("MINIMAX_API_KEY")
+
+    @classmethod
+    def _api_base_url(cls) -> str:
+        value = os.environ.get("MINIMAX_API_BASE_URL", cls.DEFAULT_API_BASE_URL).strip()
+        try:
+            parsed = urlsplit(value)
+            port = parsed.port
+        except ValueError as exc:
+            raise ValueError("MINIMAX_API_BASE_URL is not a valid MiniMax API URL") from exc
+        if (
+            parsed.scheme != "https"
+            or parsed.hostname not in cls.OFFICIAL_API_HOSTS
+            or parsed.username is not None
+            or parsed.password is not None
+            or port not in (None, 443)
+            or parsed.path not in ("", "/")
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError(
+                "MINIMAX_API_BASE_URL must be https://api.minimaxi.com (China) "
+                "or https://api.minimax.io (Global)"
+            )
+        return value.rstrip("/")
+
+    @classmethod
+    def _direct_urls(cls) -> tuple[str, str, str]:
+        base_url = cls._api_base_url()
+        return (
+            f"{base_url}/v1/video_generation",
+            f"{base_url}/v1/query/video_generation",
+            f"{base_url}/v1/files/retrieve",
+        )
 
     @staticmethod
     def _fal_api_key() -> str | None:
@@ -435,6 +472,7 @@ class MiniMaxVideo(BaseTool):
             "Content-Type": "application/json",
         }
         try:
+            create_url, query_url, retrieve_url = self._direct_urls()
             poll_interval = float(inputs.get("poll_interval_seconds", 10))
             timeout_seconds = int(inputs.get("timeout_seconds", 1800))
             if file_id is None:
@@ -448,7 +486,7 @@ class MiniMaxVideo(BaseTool):
                 payload = self._build_direct_payload(inputs)
                 submission_attempted = True
                 submit_response = requests.post(
-                    self.DIRECT_CREATE_URL,
+                    create_url,
                     headers=headers,
                     json=payload,
                     timeout=(10, 60),
@@ -473,6 +511,7 @@ class MiniMaxVideo(BaseTool):
                     requests_module=requests,
                     headers=headers,
                     task_id=task_id,
+                    query_url=query_url,
                     poll_interval=poll_interval,
                     timeout_seconds=timeout_seconds,
                 )
@@ -482,7 +521,7 @@ class MiniMaxVideo(BaseTool):
                 file_id = str(file_id)
 
             retrieve_response = requests.get(
-                self.DIRECT_RETRIEVE_URL,
+                retrieve_url,
                 headers=headers,
                 params={"file_id": file_id},
                 timeout=(10, 60),
@@ -655,6 +694,7 @@ class MiniMaxVideo(BaseTool):
         requests_module: Any,
         headers: dict[str, str],
         task_id: str,
+        query_url: str,
         poll_interval: float,
         timeout_seconds: int,
     ) -> dict[str, Any]:
@@ -665,7 +705,7 @@ class MiniMaxVideo(BaseTool):
         deadline = time.monotonic() + timeout_seconds
         while True:
             response = requests_module.get(
-                self.DIRECT_QUERY_URL,
+                query_url,
                 headers=headers,
                 params={"task_id": task_id},
                 timeout=(10, 30),

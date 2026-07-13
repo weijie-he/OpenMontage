@@ -7,6 +7,7 @@ import re
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from tools.base_tool import (
     BaseTool,
@@ -24,7 +25,7 @@ from tools.base_tool import (
 
 class MiniMaxTTS(BaseTool):
     name = "minimax_tts"
-    version = "0.1.0"
+    version = "0.2.0"
     tier = ToolTier.VOICE
     capability = "tts"
     provider = "minimax"
@@ -36,7 +37,9 @@ class MiniMaxTTS(BaseTool):
     dependencies = []
     install_instructions = (
         "Set MINIMAX_API_KEY to a MiniMax Platform API key.\n"
-        "  Get one at https://platform.minimax.io/user-center/basic-information/interface-key"
+        "  China: https://platform.minimaxi.com/user-center/basic-information/interface-key\n"
+        "  Global: https://platform.minimax.io/user-center/basic-information/interface-key\n"
+        "MINIMAX_API_BASE_URL defaults to China's https://api.minimaxi.com."
     )
     fallback = "piper_tts"
     fallback_tools = [
@@ -217,7 +220,9 @@ class MiniMaxTTS(BaseTool):
         "When subtitles are requested, verify returned word/sentence timing before composition",
     ]
 
-    DEFAULT_ENDPOINT = "https://api.minimax.io/v1/t2a_v2"
+    DEFAULT_API_BASE_URL = "https://api.minimaxi.com"
+    OFFICIAL_API_HOSTS = {"api.minimaxi.com", "api.minimax.io"}
+    DEFAULT_ENDPOINT = f"{DEFAULT_API_BASE_URL}/v1/t2a_v2"
     PUBLISHED_PAYGO_RATE_PER_CHARACTER_USD = {
         "speech-2.8-hd": 0.0001,
         "speech-2.8-turbo": 0.00006,
@@ -233,7 +238,55 @@ class MiniMaxTTS(BaseTool):
     }
 
     def get_status(self) -> ToolStatus:
-        return ToolStatus.AVAILABLE if os.environ.get("MINIMAX_API_KEY") else ToolStatus.UNAVAILABLE
+        return ToolStatus.AVAILABLE if self._credential_entries() else ToolStatus.UNAVAILABLE
+
+    @staticmethod
+    def _credential_entries() -> list[tuple[str, str]]:
+        entries: list[tuple[str, str]] = []
+        seen: set[str] = set()
+        for slot, variable_name in (
+            ("primary", "MINIMAX_API_KEY"),
+            ("fallback", "MINIMAX_API_KEY_FALLBACK"),
+        ):
+            key = os.environ.get(variable_name, "").strip()
+            if key and key not in seen:
+                entries.append((slot, key))
+                seen.add(key)
+        return entries
+
+    @classmethod
+    def _validate_official_url(cls, value: str, variable_name: str) -> str:
+        try:
+            parsed = urlsplit(value)
+            port = parsed.port
+        except ValueError as exc:
+            raise ValueError(f"{variable_name} is not a valid MiniMax API URL") from exc
+        if (
+            parsed.scheme != "https"
+            or parsed.hostname not in cls.OFFICIAL_API_HOSTS
+            or parsed.username is not None
+            or parsed.password is not None
+            or port not in (None, 443)
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError(
+                f"{variable_name} must use the official api.minimaxi.com (China) "
+                "or api.minimax.io (Global) HTTPS host"
+            )
+        return value.rstrip("/")
+
+    @classmethod
+    def _endpoint(cls) -> str:
+        explicit_endpoint = os.environ.get("MINIMAX_TTS_ENDPOINT", "").strip()
+        if explicit_endpoint:
+            return cls._validate_official_url(explicit_endpoint, "MINIMAX_TTS_ENDPOINT")
+        base_url = os.environ.get("MINIMAX_API_BASE_URL", cls.DEFAULT_API_BASE_URL).strip()
+        base_url = cls._validate_official_url(base_url, "MINIMAX_API_BASE_URL")
+        parsed = urlsplit(base_url)
+        if parsed.path not in ("", "/"):
+            raise ValueError("MINIMAX_API_BASE_URL must not include an API path")
+        return f"{base_url}/v1/t2a_v2"
 
     def estimate_cost(self, inputs: dict[str, Any]) -> float:
         rate = self._override_rate_per_1000_chars()
@@ -255,9 +308,12 @@ class MiniMaxTTS(BaseTool):
         return max(3.0, len(str(inputs.get("text", ""))) / 12)
 
     def execute(self, inputs: dict[str, Any]) -> ToolResult:
-        api_key = os.environ.get("MINIMAX_API_KEY")
-        if not api_key:
-            return ToolResult(success=False, error="MINIMAX_API_KEY not set. " + self.install_instructions)
+        credentials = self._credential_entries()
+        if not credentials:
+            return ToolResult(
+                success=False,
+                error="MINIMAX_API_KEY or MINIMAX_API_KEY_FALLBACK not set. " + self.install_instructions,
+            )
 
         import requests
 
@@ -268,23 +324,33 @@ class MiniMaxTTS(BaseTool):
         synthesis_status: Any = None
         synthesis_completed = False
         request_attempted = False
+        credential_slot: str | None = None
+        credential_attempts = 0
+        quota_rejected = False
         estimated_cost = 0.0
         try:
             payload = self._build_payload(inputs)
             estimated_cost = self.estimate_cost(inputs)
-            endpoint = os.environ.get("MINIMAX_TTS_ENDPOINT", self.DEFAULT_ENDPOINT)
-            request_attempted = True
-            response = requests.post(
-                endpoint,
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-                timeout=(10, 120),
-            )
-            response.raise_for_status()
-            response_data = response.json()
+            endpoint = self._endpoint()
+            for index, (credential_slot, api_key) in enumerate(credentials):
+                credential_attempts += 1
+                request_attempted = True
+                response = requests.post(
+                    endpoint,
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
+                    timeout=(10, 120),
+                )
+                response.raise_for_status()
+                response_data = response.json()
+                status_code = self._api_status_code(response_data)
+                quota_rejected = status_code in (2056, "2056")
+                if quota_rejected and index + 1 < len(credentials):
+                    continue
+                break
             self._raise_for_api_error(response_data)
 
             response_payload = response_data.get("data") or {}
@@ -325,6 +391,9 @@ class MiniMaxTTS(BaseTool):
                     "MiniMax confirmed synthesis status=2, so this request may have been charged; "
                     "do not resubmit blindly."
                 )
+            elif quota_rejected:
+                charge_state = "not_completed_quota_rejected"
+                retry_warning = "MiniMax rejected every configured credential because its usage limit was reached."
             elif request_attempted:
                 charge_state = "unknown"
                 retry_warning = (
@@ -339,10 +408,12 @@ class MiniMaxTTS(BaseTool):
                 "provider": self.provider,
                 "synthesis_completed": synthesis_completed,
                 "request_attempted": request_attempted,
+                "credential_slot": credential_slot,
+                "credential_attempts": credential_attempts,
                 "charge_state": charge_state,
                 "resubmit_safe": not request_attempted,
                 "estimated_cost_usd": estimated_cost,
-                "potential_cost_usd": estimated_cost if request_attempted else 0.0,
+                "potential_cost_usd": estimated_cost if request_attempted and not quota_rejected else 0.0,
                 "status": synthesis_status,
                 "usage": usage,
                 "trace_id": response_data.get("trace_id"),
@@ -387,6 +458,8 @@ class MiniMaxTTS(BaseTool):
             success=True,
             data={
                 "provider": self.provider,
+                "credential_slot": credential_slot,
+                "credential_attempts": credential_attempts,
                 "model": payload["model"],
                 "voice_id": payload["voice_setting"]["voice_id"],
                 "format": payload["audio_setting"]["format"],
@@ -529,9 +602,13 @@ class MiniMaxTTS(BaseTool):
         return audio_format, sample_rate, bitrate
 
     @staticmethod
+    def _api_status_code(data: dict[str, Any]) -> Any:
+        return (data.get("base_resp") or {}).get("status_code")
+
+    @staticmethod
     def _raise_for_api_error(data: dict[str, Any]) -> None:
         base_resp = data.get("base_resp") or {}
-        status_code = base_resp.get("status_code")
+        status_code = MiniMaxTTS._api_status_code(data)
         if status_code not in (None, 0, "0"):
             status_msg = base_resp.get("status_msg") or "unknown API error"
             raise RuntimeError(f"MiniMax API error {status_code}: {status_msg}")
@@ -566,8 +643,7 @@ class MiniMaxTTS(BaseTool):
     @staticmethod
     def _safe_error(exc: Exception) -> str:
         message = str(exc)
-        key = os.environ.get("MINIMAX_API_KEY")
-        if key:
+        for _, key in MiniMaxTTS._credential_entries():
             message = message.replace(key, "[redacted]")
         message = re.sub(
             r"([?&][^=\s&]+)=([^&\s]+)",

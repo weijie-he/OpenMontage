@@ -226,6 +226,7 @@ FAL_KEY=your-key               # FLUX images + Google Veo, Kling, MiniMax video 
 
 # MiniMax official API (one key for video + voice):
 MINIMAX_API_KEY=your-key       # Hailuo 2.3 video + Speech 2.8 TTS
+MINIMAX_API_BASE_URL=https://api.minimaxi.com  # China default; use api.minimax.io for a Global key
 
 # Free stock media:
 PEXELS_API_KEY=your-key        # Free stock footage and images

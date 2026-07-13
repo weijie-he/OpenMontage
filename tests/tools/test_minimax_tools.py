@@ -92,6 +92,36 @@ def test_video_backend_auto_prefers_direct_then_fal():
         ) == "fal"
 
 
+def test_minimax_defaults_to_china_and_allows_explicit_global_host():
+    with patch.dict(os.environ, {}, clear=True):
+        assert MiniMaxVideo._direct_urls() == (
+            "https://api.minimaxi.com/v1/video_generation",
+            "https://api.minimaxi.com/v1/query/video_generation",
+            "https://api.minimaxi.com/v1/files/retrieve",
+        )
+        assert MiniMaxTTS._endpoint() == "https://api.minimaxi.com/v1/t2a_v2"
+
+    with patch.dict(
+        os.environ,
+        {"MINIMAX_API_BASE_URL": "https://api.minimax.io/"},
+        clear=True,
+    ):
+        assert MiniMaxVideo._direct_urls()[0] == "https://api.minimax.io/v1/video_generation"
+        assert MiniMaxTTS._endpoint() == "https://api.minimax.io/v1/t2a_v2"
+
+
+def test_minimax_rejects_unofficial_api_host_before_forwarding_credentials():
+    with patch.dict(
+        os.environ,
+        {"MINIMAX_API_BASE_URL": "https://example.com"},
+        clear=True,
+    ):
+        with pytest.raises(ValueError, match="api.minimaxi.com"):
+            MiniMaxVideo._direct_urls()
+        with pytest.raises(ValueError, match="api.minimaxi.com"):
+            MiniMaxTTS._endpoint()
+
+
 def test_invalid_video_backend_never_falls_through_to_paid_provider(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "requests.post",
@@ -637,6 +667,61 @@ def test_tts_decodes_hex_audio_and_returns_usage(tmp_path, monkeypatch):
     assert calls[0][0] == MiniMaxTTS.DEFAULT_ENDPOINT
     assert calls[0][1]["headers"]["Authorization"] == "Bearer secret-mm"
     assert calls[0][1]["json"]["output_format"] == "hex"
+
+
+def test_tts_uses_fallback_key_only_after_explicit_usage_limit(tmp_path, monkeypatch):
+    calls = []
+
+    def fake_post(url, **kwargs):  # noqa: ANN001, ANN202
+        calls.append(kwargs["headers"]["Authorization"])
+        if len(calls) == 1:
+            return _Response(
+                {"base_resp": {"status_code": 2056, "status_msg": "usage limit reached"}}
+            )
+        return _Response(
+            {
+                "data": {"audio": b"ID3-fallback".hex(), "status": 2},
+                "base_resp": {"status_code": 0, "status_msg": "success"},
+            }
+        )
+
+    monkeypatch.setattr("requests.post", fake_post)
+    with patch.dict(
+        os.environ,
+        {"MINIMAX_API_KEY": "primary", "MINIMAX_API_KEY_FALLBACK": "fallback"},
+        clear=True,
+    ):
+        result = MiniMaxTTS().execute(
+            {"text": "test", "output_path": str(tmp_path / "fallback.mp3")}
+        )
+
+    assert result.success is True
+    assert calls == ["Bearer primary", "Bearer fallback"]
+    assert result.data["credential_slot"] == "fallback"
+    assert result.data["credential_attempts"] == 2
+
+
+def test_tts_does_not_rotate_credentials_after_unknown_failure(tmp_path, monkeypatch):
+    calls = []
+
+    def fake_post(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+        calls.append(kwargs["headers"]["Authorization"])
+        raise TimeoutError("read timed out")
+
+    monkeypatch.setattr("requests.post", fake_post)
+    with patch.dict(
+        os.environ,
+        {"MINIMAX_API_KEY": "primary", "MINIMAX_API_KEY_FALLBACK": "fallback"},
+        clear=True,
+    ):
+        result = MiniMaxTTS().execute(
+            {"text": "test", "output_path": str(tmp_path / "timeout.mp3")}
+        )
+
+    assert result.success is False
+    assert calls == ["Bearer primary"]
+    assert result.data["credential_attempts"] == 1
+    assert result.data["charge_state"] == "unknown"
 
 
 def test_tts_business_error_invalid_hex_and_key_redaction(tmp_path, monkeypatch):

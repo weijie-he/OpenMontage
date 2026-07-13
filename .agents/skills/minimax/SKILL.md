@@ -5,14 +5,20 @@ description: MiniMax official API integration for Hailuo 2.3 text/image-to-video
 
 # MiniMax Video + TTS
 
-Use the official MiniMax API with bearer authentication:
+Default to the China MiniMax control plane. Use bearer authentication:
 
 ```text
 Authorization: Bearer ${MINIMAX_API_KEY}
-Base URL: https://api.minimax.io
+Base URL: ${MINIMAX_API_BASE_URL:-https://api.minimaxi.com}
 ```
 
 Never log the key or include it in project artifacts. The OpenMontage tools redact it from returned errors.
+
+Treat China and Global as separate control planes. Pair a China key with
+`https://api.minimaxi.com` and a Global key with `https://api.minimax.io`; do
+not probe a key against the other region. OpenMontage defaults to China. Only
+these two official HTTPS hosts are allowed, preventing credential forwarding
+to arbitrary endpoints.
 
 ## OpenMontage Tools
 
@@ -38,9 +44,9 @@ This prevents a scoring difference from switching providers and prevents the leg
 Video generation is asynchronous and has three steps:
 
 ```text
-POST https://api.minimax.io/v1/video_generation
-GET  https://api.minimax.io/v1/query/video_generation?task_id=...
-GET  https://api.minimax.io/v1/files/retrieve?file_id=...
+POST ${MINIMAX_API_BASE_URL}/v1/video_generation
+GET  ${MINIMAX_API_BASE_URL}/v1/query/video_generation?task_id=...
+GET  ${MINIMAX_API_BASE_URL}/v1/files/retrieve?file_id=...
 ```
 
 The final retrieve response contains `file.download_url`; download it immediately rather than treating the temporary URL as the artifact.
@@ -88,7 +94,7 @@ Camera commands can be placed directly in the prompt, for example `[Static shot]
 Use non-streaming HTTP synthesis:
 
 ```text
-POST https://api.minimax.io/v1/t2a_v2
+POST ${MINIMAX_API_BASE_URL}/v1/t2a_v2
 ```
 
 ```json
@@ -196,6 +202,7 @@ MINIMAX_TTS_COST_PER_1000_CHARS_USD
 ## Troubleshooting
 
 - `MINIMAX_API_KEY not set`: add the key to `.env`; do not pass it in prompts or tool inputs.
+- China key authentication fails: require `MINIMAX_API_BASE_URL=https://api.minimaxi.com`; never test it against the Global host.
 - HTTP succeeds but the tool reports an API error: inspect `base_resp.status_code/status_msg` for authentication, balance, rate-limit, or parameter errors.
 - Video remains queued: keep the recommended polling interval and increase `timeout_seconds`; do not create duplicate paid tasks while the first task is still active.
 - Image-to-video asks for `FAL_KEY`: the selector is using an old path; direct MiniMax must receive `reference_image_path` unchanged.
@@ -204,9 +211,9 @@ MINIMAX_TTS_COST_PER_1000_CHARS_USD
 
 ## Official References
 
-- https://platform.minimax.io/docs/api-reference/video-generation-t2v
-- https://platform.minimax.io/docs/api-reference/video-generation-i2v
-- https://platform.minimax.io/docs/api-reference/video-generation-query
-- https://platform.minimax.io/docs/api-reference/file-management-retrieve
-- https://platform.minimax.io/docs/api-reference/speech-t2a-http
-- https://platform.minimax.io/docs/guides/pricing-paygo
+- https://platform.minimaxi.com/docs/api-reference/video-generation-t2v
+- https://platform.minimaxi.com/docs/api-reference/video-generation-i2v
+- https://platform.minimaxi.com/docs/api-reference/video-generation-query
+- https://platform.minimaxi.com/docs/api-reference/file-management-retrieve
+- https://platform.minimaxi.com/docs/api-reference/speech-t2a-http
+- https://platform.minimaxi.com/docs/guides/pricing-paygo
