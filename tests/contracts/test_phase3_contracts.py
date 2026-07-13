@@ -684,6 +684,7 @@ class TestCapabilityMetadata:
             "elevenlabs",
             "google_tts",
             "minimax",
+            "kling_official",
             "openai",
             "piper",
         }
