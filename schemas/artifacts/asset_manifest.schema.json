@@ -34,6 +34,28 @@
           "provider": { "type": "string", "description": "Provider name (e.g. pixabay, google_imagen)" },
           "license": { "type": "string", "description": "License type (e.g. Pixabay License, CC0)" },
           "original_url": { "type": "string", "description": "Source URL if downloaded from a stock service" },
+          "render_usage": {
+            "type": "string",
+            "enum": ["reference_only", "generated_static", "direct_render", "remotion_native"],
+            "description": "Whether the asset is only a generation reference or is allowed in the final render."
+          },
+          "source_reference_ids": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Asset IDs used as subject, layout, or style references for this generated asset."
+          },
+          "generation_path": {
+            "type": "string",
+            "description": "Pinned skill/provider/model path used to produce the asset."
+          },
+          "transform_hint": {
+            "type": "string",
+            "description": "Deterministic render-time transform required to satisfy the approved shot contract."
+          },
+          "alpha_validated": {
+            "type": "boolean",
+            "description": "True when an independent cutout was verified to contain a usable alpha channel and transparent corners."
+          },
           "voice_performance": {
             "type": "object",
             "description": "Applied voice-performance contract for narration assets.",
