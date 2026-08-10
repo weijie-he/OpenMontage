@@ -36,6 +36,19 @@ Quick routing for common explainer needs:
 
 ## Process
 
+### Step 0: Verify the Vox Real-Reference Gate
+
+If the active playbook is `vox-editorial` or any image task uses the Vox/editorial-collage language, inspect `scene_plan.metadata.vox_editorial.reference_basis_gate` before generating anything visual.
+
+The gate must be `approved` and its scope must cover the exact sample/batch scene IDs and asset categories being produced. For each generated image task, verify:
+
+- the user selected `required`, `preferred`, or `not_required`;
+- the real photo/video-frame source IDs are recorded when applicable;
+- the approved fallback is recorded;
+- the task distinguishes direct real evidence, adjacent verified evidence, editorial reconstruction, and purely decorative material.
+
+Do not generate even one styleboard or sample image while this gate is absent, pending, stale, or out of scope. A general “开始”, script approval, storyboard approval, or approval from another project is not a substitute. If a `required` reference cannot be located, stop that task and return sourcing/reframing/policy-change options to the user.
+
 ### Step 1: Inventory Required Assets
 
 Walk every scene in the scene plan. For each `required_assets` entry, create an asset task:
@@ -52,7 +65,8 @@ Asset Task:
 
 Also create tasks for:
 - **Narration audio** — one per script section (use `tts_selector` or a concrete TTS provider)
-- **Background music** — one track for the whole video (use `music_gen` or select from library)
+- **Background music** — one track for a short video or a role-based cue arc for long-form work
+  (generate, select from a local library, or acquire from an approved royalty-free source)
 - **Sound effects** — per playbook's `sfx_style` (optional, use `music_gen` or stock)
 
 ### Step 2: Check Budget
@@ -69,6 +83,8 @@ Before generating anything:
 ### Step 2b: Sample Preview (Prevents Wasted Spend)
 
 Before batch-generating assets, produce one sample of each expensive asset type and present them to the user for approval:
+
+For Vox/editorial collage, this step occurs only **after** Step 0 is approved. The reference decision applies to the sample itself, not merely to the later batch.
 
 1. **TTS sample**: Generate narration for `script.voice_performance.sample_section_id` when present; otherwise pick the section with the most demanding delivery. Play it for the user. Confirm voice, pace, pauses, emphasis, and tone are acceptable before generating the rest.
 2. **Image sample**: Generate one image for the most representative scene. Show it to the user. Confirm the style, quality, and prompt approach before batch-generating all images.
@@ -103,20 +119,33 @@ For each script section:
 or ignores intended pauses, do not batch the remaining sections. Revise the
 `voice_performance` plan or provider parameters and regenerate the sample.
 
+#### Vox biography audio adaptation
+
+For narration-led Vox biographies, build a dialogue spine before final picture timing:
+
+1. narration stem;
+2. verified archival interview excerpts as a separate stem;
+3. picture timing based on the real duration of those two stems;
+4. BGM auditioned underneath the actual dialogue;
+5. ambience and SFX placed from a centralized cue table only after picture lock.
+
+An archival quote must be an exact contiguous excerpt with source file, in/out timecode, transcript, and processing log. Preserve its documentary texture; use only necessary denoise/EQ/loudness matching, and never cover the same words with TTS. Noncommercial intent does not remove provenance requirements.
+
 ### Step 4: Generate Visual Assets
 
 Process asset tasks grouped by tool for efficiency:
 
 **Images (`image_selector`)**:
-1. Build the prompt from the scene's actual purpose:
+1. Verify the approved Vox reference-basis choice for this asset when applicable; attach the source reference IDs and agreed fallback to the asset record.
+2. Build the prompt from the scene's actual purpose:
    - scene-specific shot/lighting/texture cues from `shot_language`, `shot_intent`, and `texture_keywords`
    - an adapted visual anchor from the playbook or custom identity
    - the concrete subject/action/environment
    Use `lib/shot_prompt_builder.py` when helpful.
-2. Add negative prompt from playbook
-3. Include consistency anchors (same character/world/palette family), but do NOT reuse the exact same phrasing for every image
-4. Generate and verify the file exists
-5. If the result doesn't match expectations, refine the prompt and regenerate (max 2 retries)
+3. Add negative prompt from playbook
+4. Include consistency anchors (same character/world/palette family), but do NOT reuse the exact same phrasing for every image
+5. Generate and verify the file exists
+6. If the result doesn't match expectations, refine the prompt and regenerate (max 2 retries)
 
 **Diagrams (`diagram_gen`)**:
 1. Convert the scene description into valid Mermaid syntax
@@ -136,12 +165,39 @@ Process asset tasks grouped by tool for efficiency:
 3. Source the background track in this priority order:
    - **User-selected library track**: If the proposal specified a track from `music_library/`, copy it to `projects/<project>/assets/music/background_music.mp3`
    - **User music library (`music_library/`)**: If the folder exists and has tracks, pick the best match for the playbook's `audio.music_mood`. List candidates by filename and let the EP decide.
+   - **Approved royalty-free stock source**: Prefer the proposal's approved provider. When Pixabay
+     is selected, use its official track page or download path and freeze the file locally as soon
+     as it is resolved.
    - **Music generation API**: Use `music_gen` (ElevenLabs) or `suno_music` if available. Check status via registry first — if the tool is unavailable or quota-exhausted, skip immediately (do NOT attempt and fail silently).
    - **No music available**: Log this clearly in the asset manifest as `"music_status": "unavailable"` with the reason. Do NOT silently produce a video without music — the EP and user should know.
-4. Duration should be at least as long as total video duration. If shorter, it can be looped by the compose stage.
-5. Verify the audio file exists at `projects/<project>/assets/music/background_music.mp3`
+4. When Pixabay has a repeatable connection failure, do not retry indefinitely and do not
+   silently substitute another provider or track. Record the failed URL, method, timestamp, and
+   error, tell the user, and obtain approval to change the source. After approval, use the
+   video-shotcraft-inspired fallback:
+   - Search an official Mixkit category, tag, or mood page for a traceable track.
+   - Resolve the official track metadata and the `assets.mixkit.co/music/<id>/<id>.mp3` download
+     URL from the page. Do not treat an unverified third-party mirror or a filename alone as
+     provenance.
+   - Re-open the official license page at acquisition time. Record the license name, URL,
+     verification date, intended usage, and applicable restrictions; do not rely on a previous
+     project's license summary.
+   - Download immediately to the project, then record title, artist, provider ID, discovery page,
+     direct URL, duration, codec, and SHA-256 in the asset/media manifest.
+   - Do not blindly reuse video-shotcraft's bundled BGM. Reject any legacy file whose individual
+     source or license cannot be traced.
+5. Audition stock music beneath the actual narration and archival-dialogue stems. A standalone
+   music listen is not approval. For long-form work, prefer several cues with explicit narrative
+   roles over looping one short track for the full film. Preserve the original files and document
+   any approved repeat, extension, edit, or crossfade.
+6. Keep music provisional until the user approves the in-context audition. Append the approved
+   provider/track choice to the decision log; source changes must use a new decision entry rather
+   than rewriting history.
+7. Verify every selected file exists under `projects/<project>/assets/music/` and is registered in
+   the asset manifest. Keep the review mix separate from the source cues.
 
 **Critical:** If music generation fails or is unavailable, report it immediately in the asset manifest — do not defer the problem to the compose stage.
+
+For dialogue-led Vox work, music selection is provisional until auditioned beneath the assembled narration and archival-speech stems. Keep narration, archival speech, BGM, ambience, and SFX as separate files. Reusable scene components must not embed final SFX timings; store cues centrally with semantic or scene-relative anchors rather than bare absolute frame numbers.
 
 ### Step 6: Build Asset Manifest
 
@@ -218,6 +274,10 @@ Assemble all generated assets into the manifest:
 - [ ] Narration assets record `voice_performance.delivery_cues_applied`
 - [ ] Approved TTS sample uses the same provider, voice, and expressive settings as the batch
 - [ ] Images match the playbook's style (review consistency anchors)
+- [ ] Every Vox image falls within an explicitly approved real-reference gate scope
+- [ ] Every Vox image records reference source IDs/basis and the approved fallback
+- [ ] Archival speech records exact source, timecodes, transcript, and processing; TTS does not duplicate it
+- [ ] Vox audio remains on separate stems and final SFX cues are deferred until picture lock
 - [ ] Diagrams are legible and complete
 - [ ] Total cost within budget
 
@@ -259,6 +319,8 @@ the AI model's training data — it may be wrong or outdated.
 - **Missing pronunciation guide**: "PostgreSQL" or "Kubernetes" will be mispronounced without explicit guidance.
 - **One retry then give up**: If an image doesn't match, refine the prompt specifically — don't just retry the same prompt.
 - **AI-generating images with exact text (CTA, business names, contact info)**: AI image models frequently hallucinate wrong text — wrong business name, wrong phone number, misspelled words. **Never use AI image generation for scenes where text must be verbatim.** Use Remotion `text_card` type instead. This applies to: CTA screens, title cards with business names, contact info overlays, legal disclaimers. If a scene's `type` is `text_card` in the scene plan, do NOT generate an image for it — skip it and let the compose stage render it natively in Remotion.
+- **Treating the style sample as exempt from the reference gate**: A wrong face, age, vehicle, pose, or ceremony in the first sample creates the same downstream rework as a wrong batch. Vox samples require the same explicit evidence policy as final assets.
+- **Embedding final SFX in scene components**: This makes dialogue edits and transition changes brittle. Keep a central cue table, alternate/taper repeated arrival sounds, and place final effects after picture lock.
 
 
 ## When You Do Not Know How

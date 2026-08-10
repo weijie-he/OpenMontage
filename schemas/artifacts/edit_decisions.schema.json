@@ -113,6 +113,26 @@
           "type": "object",
           "properties": {
             "asset_id": { "type": "string" },
+            "segments": {
+              "type": "array",
+              "description": "Role-based music cue arc for long-form edits. When present, this supersedes the single asset_id field.",
+              "items": {
+                "type": "object",
+                "required": ["asset_id", "start_seconds", "end_seconds"],
+                "properties": {
+                  "asset_id": { "type": "string" },
+                  "start_seconds": { "type": "number", "minimum": 0 },
+                  "end_seconds": { "type": "number", "minimum": 0 },
+                  "trim_start_seconds": { "type": "number", "minimum": 0, "default": 0 },
+                  "volume": { "type": "number", "minimum": 0, "maximum": 1 },
+                  "fade_in_seconds": { "type": "number", "minimum": 0 },
+                  "fade_out_seconds": { "type": "number", "minimum": 0 },
+                  "role": { "type": "string" },
+                  "reprise": { "type": "boolean", "default": false }
+                },
+                "additionalProperties": false
+              }
+            },
             "volume": { "type": "number", "minimum": 0, "maximum": 1 },
             "fade_in_seconds": { "type": "number", "minimum": 0 },
             "fade_out_seconds": { "type": "number", "minimum": 0 },

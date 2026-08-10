@@ -17,6 +17,20 @@ This is where words become visuals. A great script with a bad scene plan produce
 
 ## Process
 
+### Step 0: Vox Real-Reference Gate (Hard Gate)
+
+When the active playbook is `vox-editorial` or the requested visual language is Vox/editorial collage, read `.agents/skills/vox-editorial/SKILL.md` and its linked reference-basis workflow before decomposing generated-image work.
+
+Before **any** styleboard, sample image, regeneration, or batch image generation can begin, present the user with a scene/category matrix and obtain an explicit choice for each category:
+
+- `required` — the generated collage must be based on verified real photos or frames from named source videos;
+- `preferred` — look for real references first, then return to the user if none can be found;
+- `not_required` — editorial reconstruction is allowed, while factual identity claims remain prohibited.
+
+At minimum, separate people/ages, vehicles/products, named locations, documented actions or ceremonies, and decorative/environmental elements. Script approval, storyboard approval, a general “通过”, or a previous project's choice does **not** count as approval for this gate.
+
+Record the result in `scene_plan.metadata.vox_editorial.reference_basis_gate`, including approval status/date, covered scene IDs or asset categories, required source IDs, and the agreed fallback. A scene plan may be drafted while the gate is pending, but it must not authorize downstream image generation. If a `required` reference is missing, mark that asset blocked and offer sourcing, reframing, or an explicit policy change; never silently invent the shot.
+
 ### Step 1: Analyze the Script
 
 Read every section. For each, note:
@@ -39,6 +53,8 @@ If you encounter a visualization need that no existing skill covers, use the **S
 ### Step 3: Decompose into Scenes
 
 Transform each script section into 1-3 visual scenes. Each scene is a distinct visual moment.
+
+For Vox/editorial-collage scenes, also attach a compact shot recipe: narrative intent, energy, shot size/layout, one primary motion, entrance/development/settle/hold/exit phases, transition relationship, sound intent, and acceptance frames for entrance/peak/settled states. Choose camera motion for narrative meaning, not novelty; long-form biography should reserve high-energy recipes for genuine peaks.
 
 ```json
 {
@@ -189,6 +205,9 @@ The style playbook constrains your visual choices:
 - [ ] All required_asset descriptions include style cues from the playbook
 - [ ] No scene violates pacing rules (min/max duration)
 - [ ] Image descriptions reference the video's actual visual identity, not just a preset name
+- [ ] For Vox/editorial collage, the real-reference matrix is explicitly approved or generation is marked blocked
+- [ ] Every Vox generated asset states its reference requirement, source IDs/basis, and approved fallback
+- [ ] Every Vox shot has a semantic recipe and fixed acceptance frames, not only an effect name
 
 ### Step 6: Verify Coverage and Variety
 
@@ -238,6 +257,7 @@ Call `handle_explainer_scene_plan(state, {"scene_plan": scene_plan_json})` to va
 - **Preset thinking**: A scene plan that says "make it flat-motion-graphics" is not enough. The planner must specify what makes THIS video's motion graphics feel distinct.
 - **Static scenes for dynamic concepts**: If the narrator describes a process or transformation, the visual should move. Use animation or progressive reveal, not a static image.
 - **Using `generated` type for CTA/closing screens with exact text**: AI image models hallucinate text — wrong business names, misspelled words, wrong phone numbers. Any scene with verbatim text (CTA, business info, contact details, legal) MUST be `type: "text_card"` so Remotion renders the text exactly. Never plan a `generated` image for a scene where text accuracy matters.
+- **Assuming real-reference permission**: For Vox work, neither an approved script nor an approved storyboard answers whether generated portraits, vehicles, places, or documented actions must use real evidence. Ask and record the dedicated gate before any image sample.
 
 ---
 
