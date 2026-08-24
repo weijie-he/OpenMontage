@@ -30,6 +30,30 @@ from tools.base_tool import (
     ToolTier,
 )
 
+REGION_BASE_URLS = {
+    "global": "https://api.minimax.io",
+    "global_en": "https://api.minimax.io",
+    "cn": "https://api.minimaxi.com",
+    "cn_zh": "https://api.minimaxi.com",
+}
+DEFAULT_REGION = "global"
+V2_MODELS = ["MiniMax-H3"]
+V1_MODELS = [
+    "MiniMax-Hailuo-2.3",
+    "MiniMax-Hailuo-2.3-Fast",
+    "MiniMax-Hailuo-02",
+    "T2V-01-Director",
+    "T2V-01",
+    "I2V-01-Director",
+    "I2V-01-live",
+    "I2V-01",
+]
+MODELS = V2_MODELS + V1_MODELS
+DEFAULT_MODEL = "MiniMax-H3"
+V2_RATIO_VALUES = ["adaptive", "21:9", "16:9", "4:3", "1:1", "3:4", "9:16"]
+_V2_IN_PROGRESS = {"queued", "running"}
+_V2_SUCCESS = "succeeded"
+_V2_FAILURES = {"failed", "cancelled"}
 
 class MiniMaxVideo(BaseTool):
     name = "minimax_video"
@@ -42,7 +66,7 @@ class MiniMaxVideo(BaseTool):
     determinism = Determinism.STOCHASTIC
     runtime = ToolRuntime.API
 
-    dependencies = []
+    dependencies = ["env:MINIMAX_API_KEY"]
     install_instructions = (
         "Set MINIMAX_API_KEY for MiniMax's official API (recommended).\n"
         "  China: https://platform.minimaxi.com/user-center/basic-information/interface-key\n"
@@ -52,10 +76,21 @@ class MiniMaxVideo(BaseTool):
     )
     agent_skills = ["minimax", "ai-video-gen"]
 
-    capabilities = ["text_to_video", "image_to_video"]
+    capabilities = [
+        "text_to_video",
+        "image_to_video",
+        "first_last_frame_to_video",
+        "reference_to_video",
+    ]
     supports = {
         "text_to_video": True,
         "image_to_video": True,
+        "first_last_frame_to_video": True,
+        "reference_to_video": True,
+        "reference_image": True,
+        "reference_video": True,
+        "reference_audio": True,
+        "native_audio": True,
         "camera_direction": True,
         "official_api": True,
         "fal_gateway": True,
@@ -64,13 +99,14 @@ class MiniMaxVideo(BaseTool):
         "published_paygo_cost_estimate": True,
     }
     best_for = [
+        "2K text, image, first/last-frame, and reference video generation with MiniMax-H3",
         "direct Hailuo 2.3 text-to-video and image-to-video generation",
         "prompt-following with explicit camera directions",
         "short cinematic clips with detailed character motion",
     ]
     not_good_for = [
         "offline generation",
-        "single clips longer than 10 seconds",
+        "clips longer than 15 seconds",
         "direct text-to-video jobs that require an explicit aspect-ratio parameter",
     ]
     fallback_tools = ["kling_video", "veo_video", "wan_video"]
@@ -91,7 +127,12 @@ class MiniMaxVideo(BaseTool):
             },
             "operation": {
                 "type": "string",
-                "enum": ["text_to_video", "image_to_video"],
+                "enum": [
+                    "text_to_video",
+                    "image_to_video",
+                    "first_last_frame_to_video",
+                    "reference_to_video",
+                ],
                 "default": "text_to_video",
             },
             "backend": {
@@ -102,12 +143,8 @@ class MiniMaxVideo(BaseTool):
             },
             "model": {
                 "type": "string",
-                "enum": [
-                    "MiniMax-Hailuo-2.3",
-                    "MiniMax-Hailuo-2.3-Fast",
-                    "MiniMax-Hailuo-02",
-                ],
-                "default": "MiniMax-Hailuo-2.3",
+                "enum": MODELS,
+                "default": DEFAULT_MODEL,
                 "description": "Official MiniMax model used by the direct backend.",
             },
             "model_variant": {
@@ -144,6 +181,16 @@ class MiniMaxVideo(BaseTool):
                 "description": "Alias for first_frame_image/reference_image_url.",
             },
             "reference_image_url": {"type": "string"},
+            "reference_image_urls": {"type": "array", "items": {"type": "string"}},
+            "reference_video_url": {"type": "string"},
+            "reference_video_urls": {"type": "array", "items": {"type": "string"}},
+            "reference_audio_urls": {"type": "array", "items": {"type": "string"}},
+            "last_frame_image": {"type": "string"},
+            "end_image_url": {"type": "string"},
+            "ratio": {"type": "string", "enum": V2_RATIO_VALUES},
+            "aspect_ratio": {"type": "string", "enum": V2_RATIO_VALUES},
+            "callback_url": {"type": "string"},
+            "aigc_watermark": {"type": "boolean"},
             "reference_image_path": {
                 "type": "string",
                 "description": "Local first-frame image. Direct mode encodes it as a Base64 data URL.",
@@ -217,6 +264,17 @@ class MiniMaxVideo(BaseTool):
         "resolution",
         "reference_image_path",
         "reference_image_url",
+        "reference_image_urls",
+        "reference_video_url",
+        "reference_video_urls",
+        "reference_audio_urls",
+        "first_frame_image",
+        "last_frame_image",
+        "end_image_url",
+        "ratio",
+        "aspect_ratio",
+        "callback_url",
+        "aigc_watermark",
         "task_id",
         "file_id",
     ]
@@ -280,9 +338,36 @@ class MiniMaxVideo(BaseTool):
     def _direct_api_key() -> str | None:
         return os.environ.get("MINIMAX_API_KEY")
 
+    def _get_api_key(self) -> str | None:
+        return self._direct_api_key()
+
+    def _region(self) -> str:
+        region = os.environ.get("MINIMAX_REGION", DEFAULT_REGION).strip().lower()
+        return "cn" if region in {"cn", "cn_zh"} else "global"
+
+    def _base_url(self) -> str:
+        override = os.environ.get("MINIMAX_BASE_URL")
+        if override:
+            return override.rstrip("/")
+        region = os.environ.get("MINIMAX_REGION", DEFAULT_REGION).strip().lower()
+        return REGION_BASE_URLS.get(region, REGION_BASE_URLS[DEFAULT_REGION])
+
+    def _uses_cn_api(self, base_url: str) -> bool:
+        return self._region() == "cn" or "api.minimaxi.com" in base_url
+
     @classmethod
     def _api_base_url(cls) -> str:
-        value = os.environ.get("MINIMAX_API_BASE_URL", cls.DEFAULT_API_BASE_URL).strip()
+        if os.environ.get("MINIMAX_BASE_URL"):
+            value = os.environ["MINIMAX_BASE_URL"].strip()
+        elif "MINIMAX_REGION" in os.environ:
+            value = REGION_BASE_URLS.get(
+                os.environ["MINIMAX_REGION"].strip().lower(),
+                REGION_BASE_URLS[DEFAULT_REGION],
+            )
+        elif "MINIMAX_API_BASE_URL" in os.environ:
+            value = os.environ["MINIMAX_API_BASE_URL"].strip()
+        else:
+            value = cls.DEFAULT_API_BASE_URL
         try:
             parsed = urlsplit(value)
             port = parsed.port
@@ -316,6 +401,16 @@ class MiniMaxVideo(BaseTool):
     @staticmethod
     def _fal_api_key() -> str | None:
         return os.environ.get("FAL_KEY") or os.environ.get("FAL_AI_API_KEY")
+
+    @staticmethod
+    def _model_for_inputs(inputs: dict[str, Any]) -> str:
+        if inputs.get("model"):
+            return str(inputs["model"])
+        # Keep the legacy explicit backend/payload contract stable while the
+        # capability-level selector defaults to the newer MiniMax-H3 route.
+        if "backend" in inputs or "model_variant" in inputs:
+            return "MiniMax-Hailuo-2.3"
+        return DEFAULT_MODEL
 
     def _resolve_backend(self, inputs: dict[str, Any]) -> str:
         raw_backend = inputs["backend"] if "backend" in inputs else "auto"
@@ -354,6 +449,15 @@ class MiniMaxVideo(BaseTool):
         return ToolStatus.UNAVAILABLE
 
     def estimate_cost(self, inputs: dict[str, Any]) -> float:
+        model = self._model_for_inputs(inputs)
+        if model == "MiniMax-H3":
+            duration = inputs.get("duration", 5)
+            if isinstance(duration, str) and duration.isdigit():
+                duration = int(duration)
+            seconds = duration if isinstance(duration, int) and not isinstance(duration, bool) else 5
+            reference_images = len(inputs.get("reference_image_urls") or [])
+            additional_images = max(0, reference_images - 5)
+            return round((seconds * 0.13) + (additional_images * 0.03), 2)
         backend = self._resolve_backend(inputs)
         resume_error = self._resume_backend_error(inputs, backend)
         if resume_error:
@@ -383,6 +487,12 @@ class MiniMaxVideo(BaseTool):
 
         operation = str(inputs.get("operation", "text_to_video"))
         model = str(inputs.get("model", "MiniMax-Hailuo-2.3"))
+        if model in V1_MODELS and model not in {
+            "MiniMax-Hailuo-2.3",
+            "MiniMax-Hailuo-2.3-Fast",
+            "MiniMax-Hailuo-02",
+        }:
+            return 0.15
         resolution = str(inputs.get("resolution", "1080P")).upper()
         duration = self._duration(inputs)
         self._validate_direct_spec(
@@ -404,6 +514,9 @@ class MiniMaxVideo(BaseTool):
         )
 
     def estimate_runtime(self, inputs: dict[str, Any]) -> float:
+        model = self._model_for_inputs(inputs)
+        if model == "MiniMax-H3":
+            return 90.0
         if self._resolve_backend(inputs) == "fal":
             variant = str(inputs.get("model_variant", "hailuo-02/pro"))
             return 30.0 if "fast" in variant else 60.0
@@ -445,6 +558,8 @@ class MiniMaxVideo(BaseTool):
                     success=False,
                     error="MINIMAX_API_KEY not set. " + self.install_instructions,
                 )
+            if self._model_for_inputs(inputs) == "MiniMax-H3":
+                return self._execute_v2(inputs, api_key)
             return self._execute_direct(inputs, api_key)
 
         api_key = self._fal_api_key()
@@ -454,6 +569,181 @@ class MiniMaxVideo(BaseTool):
                 error="FAL_KEY not set for backend='fal'. " + self.install_instructions,
             )
         return self._execute_fal(inputs, api_key)
+
+    @staticmethod
+    def _base_resp_error(payload: dict[str, Any]) -> str | None:
+        base_resp = payload.get("base_resp") or {}
+        status_code = base_resp.get("status_code")
+        if status_code in (None, 0, "0"):
+            return None
+        return f"MiniMax API error {status_code}: {base_resp.get('status_msg', '')}".strip()
+
+    @staticmethod
+    def _media_content(content_type: str, url: str, role: str) -> dict[str, Any]:
+        return {"type": content_type, content_type: {"url": url}, "role": role}
+
+    @staticmethod
+    def _url_values(inputs: dict[str, Any], singular: str, plural: str) -> list[str]:
+        values: list[str] = []
+        if inputs.get(singular):
+            values.append(str(inputs[singular]))
+        values.extend(str(value) for value in (inputs.get(plural) or []) if value)
+        return values
+
+    def _build_v2_payload(
+        self, inputs: dict[str, Any], base_url: str
+    ) -> tuple[dict[str, Any] | None, str | None]:
+        operation = inputs.get("operation", "text_to_video")
+        prompt = str(inputs.get("prompt") or "")
+        if not prompt:
+            return None, "MiniMax-H3 requires 'prompt'."
+        if len(prompt) > 7000:
+            return None, "MiniMax-H3 prompt must not exceed 7000 characters."
+
+        content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+        first_frame = (
+            inputs.get("first_frame_image")
+            or inputs.get("image_url")
+            or inputs.get("reference_image_url")
+        )
+        last_frame = inputs.get("last_frame_image") or inputs.get("end_image_url")
+
+        if operation in {"image_to_video", "first_last_frame_to_video"}:
+            if not first_frame:
+                return None, f"{operation} requires 'first_frame_image'."
+            content.append(self._media_content("image_url", str(first_frame), "first_frame"))
+            if operation == "first_last_frame_to_video" and not last_frame:
+                return None, "first_last_frame_to_video requires 'last_frame_image'."
+            if last_frame:
+                content.append(self._media_content("image_url", str(last_frame), "last_frame"))
+        elif operation == "reference_to_video":
+            reference_images = self._url_values(inputs, "reference_image_url", "reference_image_urls")
+            reference_videos = self._url_values(inputs, "reference_video_url", "reference_video_urls")
+            reference_audio = [str(value) for value in (inputs.get("reference_audio_urls") or []) if value]
+            if not reference_images and not reference_videos and not reference_audio:
+                return None, "reference_to_video requires at least one reference URL."
+            if reference_audio and not (reference_images or reference_videos):
+                return None, "reference_to_video requires at least one reference image or video."
+            content.extend(self._media_content("image_url", url, "reference_image") for url in reference_images)
+            content.extend(self._media_content("video_url", url, "reference_video") for url in reference_videos)
+            content.extend(self._media_content("audio_url", url, "reference_audio") for url in reference_audio)
+        elif operation != "text_to_video":
+            return None, f"MiniMax-H3 does not support operation '{operation}'."
+
+        duration = inputs.get("duration", 5)
+        if isinstance(duration, str) and duration.isdigit():
+            duration = int(duration)
+        if isinstance(duration, bool) or not isinstance(duration, int) or not 4 <= duration <= 15:
+            return None, "MiniMax-H3 duration must be an integer from 4 to 15 seconds."
+        resolution = inputs.get("resolution", "2K")
+        if resolution != "2K":
+            return None, "MiniMax-H3 resolution must be '2K'."
+        ratio = inputs.get("ratio") or inputs.get("aspect_ratio")
+        if not ratio:
+            ratio = "16:9" if operation == "text_to_video" else "adaptive"
+        if ratio not in V2_RATIO_VALUES:
+            return None, f"Unsupported MiniMax-H3 ratio '{ratio}'."
+        if operation == "text_to_video" and ratio == "adaptive":
+            return None, "MiniMax-H3 text_to_video does not support the adaptive ratio."
+
+        payload: dict[str, Any] = {
+            "model": "MiniMax-H3",
+            "content": content,
+            "resolution": resolution,
+            "duration": duration,
+            "ratio": ratio,
+        }
+        if inputs.get("callback_url"):
+            payload["callback_url"] = inputs["callback_url"]
+        if self._uses_cn_api(base_url) and "aigc_watermark" in inputs:
+            payload["aigc_watermark"] = inputs["aigc_watermark"]
+        return payload, None
+
+    def _execute_v2(self, inputs: dict[str, Any], api_key: str) -> ToolResult:
+        import requests
+
+        started = time.time()
+        base_url = self._base_url()
+        payload, validation_error = self._build_v2_payload(inputs, base_url)
+        if validation_error:
+            return ToolResult(success=False, error=validation_error, model="MiniMax-H3")
+        assert payload is not None
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        task_id: str | None = None
+        task_data: dict[str, Any] = {}
+        poll_interval = max(float(inputs.get("poll_interval_seconds", 5)), 0.1)
+        timeout_seconds = max(float(inputs.get("timeout_seconds", 900)), 1.0)
+        deadline = time.monotonic() + timeout_seconds
+
+        def timed_out() -> ToolResult:
+            return ToolResult(
+                success=False,
+                error=(
+                    f"MiniMax video generation timed out after {timeout_seconds:g}s; "
+                    f"the remote task may still complete. Resume or inspect task_id '{task_id}'."
+                ),
+                data={"provider": self.provider, "model": "MiniMax-H3", "api_version": "v2", "task_id": task_id, "status": "timed_out"},
+                model="MiniMax-H3",
+            )
+
+        try:
+            submit_response = requests.post(
+                f"{base_url}/v2/video_generation",
+                headers=headers,
+                json=payload,
+                timeout=30,
+            )
+            submit_response.raise_for_status()
+            submit_data = submit_response.json()
+            self._raise_for_api_error(submit_data, "create H3 task")
+            task_id = submit_data.get("task_id")
+            if not task_id:
+                return ToolResult(success=False, error="MiniMax API did not return a task_id.", model="MiniMax-H3")
+
+            download_url: str | None = None
+            while True:
+                if time.monotonic() >= deadline:
+                    return timed_out()
+                time.sleep(min(poll_interval, max(deadline - time.monotonic(), 0)))
+                if time.monotonic() >= deadline:
+                    return timed_out()
+                status_response = requests.get(
+                    f"{base_url}/v2/query/video_generation/{task_id}",
+                    headers=headers,
+                    timeout=15,
+                )
+                status_response.raise_for_status()
+                task_data = status_response.json().get("task") or {}
+                status = task_data.get("status")
+                if status == _V2_SUCCESS:
+                    download_url = (task_data.get("content") or {}).get("url")
+                    break
+                if status in _V2_FAILURES:
+                    return ToolResult(success=False, error=f"MiniMax-H3 video generation {status}: {task_data.get('error') or 'unknown error'}", model="MiniMax-H3")
+                if status not in _V2_IN_PROGRESS:
+                    return ToolResult(success=False, error=f"MiniMax-H3 returned unknown task status '{status}'.", model="MiniMax-H3")
+            if not download_url:
+                return ToolResult(success=False, error="MiniMax API did not return a download URL.", model="MiniMax-H3")
+            video_response = requests.get(download_url, timeout=120)
+            video_response.raise_for_status()
+            output_path = Path(inputs.get("output_path", "minimax_output.mp4"))
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_bytes(video_response.content)
+        except Exception as exc:
+            return ToolResult(
+                success=False,
+                error=f"MiniMax H3 video generation failed: {self._safe_error(exc)}",
+                data={"provider": self.provider, "model": "MiniMax-H3", "api_version": "v2", "task_id": task_id} if task_id else {},
+                model="MiniMax-H3",
+            )
+        return ToolResult(
+            success=True,
+            data={"provider": self.provider, "model": "MiniMax-H3", "api_version": "v2", "region": base_url, "task_id": task_id, "prompt": inputs.get("prompt", ""), "task": task_data, "output": str(output_path)},
+            artifacts=[str(output_path)],
+            cost_usd=self.estimate_cost(inputs),
+            duration_seconds=round(time.time() - started, 2),
+            model="MiniMax-H3",
+        )
 
     def _execute_direct(self, inputs: dict[str, Any], api_key: str) -> ToolResult:
         import requests
@@ -478,12 +768,24 @@ class MiniMaxVideo(BaseTool):
             if file_id is None:
                 if poll_interval < 1:
                     raise ValueError("MiniMax poll_interval_seconds must be at least 1")
-                if timeout_seconds < 30:
-                    raise ValueError("MiniMax timeout_seconds must be at least 30")
+                if timeout_seconds < 1:
+                    raise ValueError("MiniMax timeout_seconds must be at least 1")
             if task_id is None and file_id is None:
-                if not inputs.get("prompt"):
+                selected_model = self._model_for_inputs(inputs)
+                prompt_optional = (
+                    selected_model in V1_MODELS
+                    and inputs.get("operation", "text_to_video") == "image_to_video"
+                )
+                if not inputs.get("prompt") and not prompt_optional:
                     raise ValueError("MiniMax video requires prompt, task_id, or file_id")
-                payload = self._build_direct_payload(inputs)
+                if selected_model not in V1_MODELS:
+                    raise ValueError(f"MiniMax v1 does not support model '{selected_model}'")
+                if selected_model in {"T2V-01-Director", "T2V-01", "I2V-01-Director", "I2V-01-live", "I2V-01"}:
+                    payload = self._build_v1_payload(inputs, selected_model)
+                else:
+                    legacy_inputs = dict(inputs)
+                    legacy_inputs.setdefault("model", selected_model)
+                    payload = self._build_direct_payload(legacy_inputs)
                 submission_attempted = True
                 submit_response = requests.post(
                     create_url,
@@ -535,7 +837,6 @@ class MiniMaxVideo(BaseTool):
 
             download = requests.get(download_url, timeout=(10, 180))
             download.raise_for_status()
-            self._validate_video_bytes(download.content)
             output_path.parent.mkdir(parents=True, exist_ok=True)
             output_path.write_bytes(download.content)
         except Exception as exc:
@@ -569,6 +870,8 @@ class MiniMaxVideo(BaseTool):
                     else self._direct_cost_estimate_status(inputs)
                 ),
             }
+            if isinstance(exc, TimeoutError):
+                error_data["status"] = "timed_out"
             if task_id or file_id:
                 resume_inputs: dict[str, Any] = {
                     "backend": "direct",
@@ -605,12 +908,12 @@ class MiniMaxVideo(BaseTool):
         cost = self.estimate_cost({**inputs, "backend": "direct"})
         model = payload["model"] if payload else inputs.get("model")
         duration = (
-            payload["duration"]
+            payload.get("duration")
             if payload
             else (self._duration(inputs) if "duration" in inputs else None)
         )
         resolution = (
-            payload["resolution"]
+            payload.get("resolution")
             if payload
             else (str(inputs["resolution"]).upper() if "resolution" in inputs else None)
         )
@@ -619,6 +922,7 @@ class MiniMaxVideo(BaseTool):
             data={
                 "provider": self.provider,
                 "backend": "direct",
+                "api_version": "v1",
                 "model": model,
                 "prompt": inputs.get("prompt"),
                 "task_id": task_id,
@@ -647,13 +951,37 @@ class MiniMaxVideo(BaseTool):
             model=str(model) if model else None,
         )
 
+    @staticmethod
+    def _build_v1_payload(inputs: dict[str, Any], model: str) -> dict[str, Any]:
+        operation = inputs.get("operation", "text_to_video")
+        if operation not in {"text_to_video", "image_to_video"}:
+            raise ValueError(f"{model} does not support operation '{operation}'")
+        payload: dict[str, Any] = {"model": model}
+        if operation == "image_to_video":
+            first_frame = inputs.get("first_frame_image") or inputs.get("reference_image_url") or inputs.get("image_url")
+            if not first_frame:
+                raise ValueError("image_to_video requires 'first_frame_image'.")
+            payload["first_frame_image"] = first_frame
+            if inputs.get("prompt"):
+                payload["prompt"] = inputs["prompt"]
+        else:
+            if not inputs.get("prompt"):
+                raise ValueError("text_to_video requires 'prompt'.")
+            payload["prompt"] = inputs["prompt"]
+        if "prompt_optimizer" in inputs:
+            payload["prompt_optimizer"] = inputs["prompt_optimizer"]
+        for field in ("fast_pretreatment", "duration", "resolution", "callback_url"):
+            if inputs.get(field) is not None:
+                payload[field] = inputs[field]
+        return payload
+
     def _build_direct_payload(self, inputs: dict[str, Any]) -> dict[str, Any]:
         operation = str(inputs.get("operation", "text_to_video"))
         model = str(inputs.get("model", "MiniMax-Hailuo-2.3"))
         duration = self._duration(inputs)
         resolution = str(inputs.get("resolution", "1080P")).upper()
 
-        if len(str(inputs["prompt"])) > 2000:
+        if inputs.get("prompt") and len(str(inputs["prompt"])) > 2000:
             raise ValueError("MiniMax prompt must be 2000 characters or fewer")
         self._validate_direct_spec(
             operation=operation,
@@ -664,11 +992,13 @@ class MiniMaxVideo(BaseTool):
 
         payload: dict[str, Any] = {
             "model": model,
-            "prompt": inputs["prompt"],
             "duration": duration,
             "resolution": resolution,
-            "prompt_optimizer": bool(inputs.get("prompt_optimizer", True)),
         }
+        if inputs.get("prompt"):
+            payload["prompt"] = inputs["prompt"]
+        if "prompt_optimizer" in inputs:
+            payload["prompt_optimizer"] = bool(inputs["prompt_optimizer"])
         if inputs.get("fast_pretreatment"):
             if model not in {
                 "MiniMax-Hailuo-2.3",
@@ -700,10 +1030,14 @@ class MiniMaxVideo(BaseTool):
     ) -> dict[str, Any]:
         if poll_interval < 1:
             raise ValueError("MiniMax poll_interval_seconds must be at least 1")
-        if timeout_seconds < 30:
-            raise ValueError("MiniMax timeout_seconds must be at least 30")
+        if timeout_seconds < 1:
+            raise ValueError("MiniMax timeout_seconds must be at least 1")
         deadline = time.monotonic() + timeout_seconds
         while True:
+            if time.monotonic() >= deadline:
+                raise TimeoutError(
+                    f"MiniMax video task {task_id} timed out after {timeout_seconds}s"
+                )
             response = requests_module.get(
                 query_url,
                 headers=headers,
@@ -721,7 +1055,7 @@ class MiniMaxVideo(BaseTool):
                 raise RuntimeError(f"MiniMax video task failed: {message}")
             if time.monotonic() >= deadline:
                 raise TimeoutError(
-                    f"MiniMax video task {task_id} did not finish within {timeout_seconds}s"
+                    f"MiniMax video task {task_id} timed out after {timeout_seconds}s"
                 )
             time.sleep(max(0.0, poll_interval))
 
